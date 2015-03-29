@@ -1,0 +1,51 @@
+This document is designed to give an overview of how the various preprocessing scripts that work to create and add features to the DGA dataset.
+
+
+1. step_one_data_mung.R creates most of the non n-grams features. They are all self explanatory with the exception of the 'dword' feature. The 'dword' feature is a value between zero and one. A higher value means an sld (second level domain) contains more dictionary words. The two functions that do the parsing were pulled from an R package 'dga'.  https://github.com/jayjacobs/dga
+
+
+2. step_two_mine_ngrams.R finds and sorts the ngrams in each sld. 
+Line 17 splits the data into train/test sets. The test data set should not be mined for ngrams as mining is part of the model training process. 
+Line 20 sets a maximum number of ngrams. (This limit is only imposed to speed up the mining process. A higher number will most likely result in a better classifer.)
+Line 25 starts a loop that will run once for 'isDGA'=TRUE and once for FALSE.
+Line 30 pulls out only one set isDGA values (TRUE or FALSE) depending on which iteration of the loop.
+Line 32 parses urls to slds. (Which is redundent as it was already done in  step_one_data_mung.R.)
+Lines 40-44 Use 'tau' package based methods to split the slds into ngrams and then reorganize them into 5 columns in the 'b' dataframe.
+Lines 48-91 This ugly code is just changing the dataframe strucutures of the one through five grams into a dataframe that is easier to work with in later steps. 
+Line 99 writes to the filesystem a file that is formatted like this:
+
+trigramTRUE,trigramTRUEcount,fourgramTRUE,fourgramTRUEcount,fivegramTRUE,fivegramTRUEcount,trigramFALSE,trigramFALSEcount,fourgramFALSE,fourgramFALSEcount,fivegramFALSE,fivegramFALSEcount
+1,f22,931,zb18,76,27c19,19,ing,30392,blog,22159,blogs,14071
+2,f52,929,o41n,72,17g53,16,log,26056,spot,14295,logsp,13439
+3,b58,927,e61d,71,38k37,16,blo,23320,logs,14145,gspot,13438
+4,b28,925,j46n,71,58c59,16,ine,22085,gspo,13495,ogspo,13425
+5,919,m29h,71,eigup,16,ion,21251,ogsp,13451,nline,8663
+The rows are organized with most common ngrams at the top. The first line of data tells us that the trigram 'f22' occurs 931 times in all the slds parsed where isDGA=TRUE.
+
+
+3. step_two_mine_family_ngrams.R does the same process as step_two_mine_ngrams.R but instead of splitting on 'is.DGA' it splits on 'dga family'. (This script is not likely going to be used when the focus is binary DGA classification.)
+
+
+4. step_three_count_ngrams.php is written in php for performance reasons. This functionality was originally coded in 'R' but performed much too slow. 
+Lines 21-42 read in the file created in step 2 and parses the results into arrays.
+Lines 46-51 crops the lists to only the top half of all possible ngrams. This is important because we want our list to represent the more common ngrams which, by my definition, is the top half of the list because the list if sorted by occurance. The 4 and 5 grams do not need this crop because the limit imposed in line 17 of step_two_mine_ngrams.R means that the 4 and 5 grams lists are already shorter than cropping to 1/2 their total possible length.
+Lines 54-73 compare the most common TRUE ngrams to the most common FALSE ngrams. Any ngram that appears in both lists is not useful for classification and, therefore, that ngram is removed from the array. The topngrams arrays are now ready for the counting of ngrams in the dataset.
+Line 88 starts the parsing and counting process loop.
+lines 102-121 calls a function 'getNgrams()' that returns a list of ngrams for that sld. Then it looks at the 'isDGA=TRUE' ngram list and increments the 'TRUE' counter if necessary. Then it does the same for 'FALSE'. This process is repeated for 1 to 5 grams.
+Line 124 takes the original string for this one line of this dataset and then appends the new count values in .csv format. This will be written out as a new datafile after the end of the loop.
+
+
+5. step_four_count_family_ngrams.php does the same work as step_three_count_ngrams.php but does it for the classification families instead of binary isDGA values. (This code was written after step_three_count_ngrams.php and is cleaner.) This script will not likely be needed for binary isDGA classification.
+
+
+6. step_five_aggregate_ngram_cols.R takes the 'counts' created in #4 and creates ratios.
+Line 12 pulls the 'test' data out of the full dataset. (When the full test takes place we will add ratios to all instances.)
+Lines 20-30 adds an ngram[TRUE|FALSE]ratio column that is the count column devided by the number of ngrams in the actual sld. This is a value from 0 to 1. This ratio might have value as it takes into account the fact that long slds are more likely to have higher ngram counts than short slds.
+Lines 33-51 do the same as lines 20-30 but for the family count columns.
+
+
+After all these steps are completed we have a data file named dgatestdata5.csv that has the original data plus all new features added. This file is in a format where it is ready to be fed to the training algorithms.
+
+
+
+
