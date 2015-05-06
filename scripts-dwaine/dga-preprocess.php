@@ -5,10 +5,22 @@
  * DGA data file from James at https://drive.google.com/file/d/0B1Dn5h3H5xylQkNrbU5mZWR2Q00/view?pli=1
  * sld allows a-z0-9 and hyphen
  *
- * trainXwithclass <- traindgadata[,c(
- * "isDGA","sldlen","dword","bigramTRUEratio","trigramTRUEratio","fourgramTRUEratio","fivegramTRUEratio","bigramFALSEratio","trigramFALSEratio","fourgramFALSEratio","fivegramFALSEratio")]
+ * trainXwithclass <- traindgadata[,c( "isDGA","sldlen","dword","bigramTRUEratio","trigramTRUEratio","fourgramTRUEratio","fivegramTRUEratio","bigramFALSEratio","trigramFALSEratio","fourgramFALSEratio","fivegramFALSEratio")]
  */
 
+
+$inputdataindex = 0;
+$inputdatafilearray = array(
+  "DGA_paperfeatures_nomcr_train.csv",
+  "DGA_paperfeatures_nomcr_train_1000.csv",
+  "DGA_paperfeatures_nomcr_train_10000.csv",
+  "DGA_classification_data_1.csv",
+  "DGA_classification_data_1_1000.csv",
+  "DGA_classification_data_1_10000.csv",
+  "DGA_classification_data_original_parse.csv",
+);
+$decimalplaces = 6;
+ 
 $time_start = microtime(true); 
  
 print("starting dga-preprocess.php\n");
@@ -58,6 +70,7 @@ for ($testslice = 0; $testslice <= 9; $testslice ++){
 
   $writehandletrain = fopen($datadirectory . "DGA_data_train_" . $testslice . ".csv", "w");
   $writehandletest = fopen($datadirectory . "DGA_data_test_" . $testslice . ".csv", "w");
+  $writehandletestfaulty = fopen($datadirectory . "DGA_data_test_" . $testslice . "_faultyURL.csv", "w");
   fwrite($writehandletrain, "url,isDGA,sld,sldlen,dwordratio\n");
   fwrite($writehandletest, "url,isDGA,sld,sldlen,dwordratio\n");
 
@@ -70,61 +83,84 @@ for ($testslice = 0; $testslice <= 9; $testslice ++){
   $nonDGAfourlist = array();
   $isDGAfivelist = array();
   $nonDGAfivelist = array();
+  
+  $dictionary = array();
+  for ($i = 2; $i <= 5; $i ++){
+    $dictionary[$i]['isDGA'] = new ArrayObject();
+    $dictionary[$i]['nonDGA'] = new ArrayObject();
+  }
 
-  //$handle = fopen("DGA_paperfeatures_nomcr_train_10.csv", "r");
-  $handle = fopen("DGA_paperfeatures_nomcr_train.csv", "r");
+
+  $handle = fopen($inputdatafilearray[$inputdataindex], "r");
   if ($handle) {
     $header = fgets($handle);
     $linenumber = 0;
     while (($line = fgetcsv($handle)) !== false) {
 
-      $url = $line[2];  //$trimmed = trim($text, " \t.");
-      $isDGA = ($line[1] == "Non-DGA")?0:1;
-      $domain = array_reverse(explode ( "." , $url));
-      $sld = strtolower($domain[1]);
+      // Preprocess James's 14 feature dataset.
+      if($inputdataindex == 0 || $inputdataindex == 1 || $inputdataindex == 2){
+        // columns specific to DGA_paperfeatures_nomcr_train.csv
+        $url = $line[2];
+        
+        if(TRUE){  // Ignore rows where IP number is in place of URL.
+          // check that this url might actually be an IP address
+          $pattern = "/[0-9]{1,3}\.[0-9]{1,3}\.([0-9]{1,3})\.[0-9]{1,3}/";
+          $found = preg_match_all($pattern, $url, $matches);
+          //if($found > 0 && ((string)$url == (string)$matches[1][0])){
+          if($found > 0 ){
+            fwrite($writehandletestfaulty, $url ."\n");
+            continue;
+          } 
+        }
+        
+        $isDGA = ($line[1] == "Non-DGA")?0:1;
+        
+        // Parse valuable parts of url.
+        $sld = strtolower($line[2]);
+     
+        $sld = rtrim($sld,"~.");
+        
+        $pattern = "/\/.*$/";
+        $sld = preg_replace($pattern, "", $sld);
+        
+        $pattern = "/\.[a-z0-9]{2,4}$/";
+        $sld = preg_replace($pattern, "", $sld);
+        $sld = preg_replace($pattern, "", $sld);
+         
+        //$sld = str_replace("-", "", $sld);
+        //$sld = str_replace(".", "", $sld);
+        $sld = str_replace(array(".","-"), "", $sld);
+
+      } else {  // Use original project style dataset.
+        // columns specific to DGA_classification_data_x.csv
+        $url = $line[1];  
+        $sld = $line[0];
+        $isDGA = $line[2];
+      }
+      
       $sldlen = strlen($sld);
-      $dwordratio = dword($sld, $dwordarray, TRUE);
+      $dwordratio = round(dword($sld, $dwordarray, TRUE), $decimalplaces);
       $thisline = $url . "," . $isDGA . "," . $sld ."," . $sldlen . ",". $dwordratio . "\n";
       
       if($linenumber % 10 == $testslice){
         // this line reserved for test dataset. Not mined for ngrams.
         fwrite($writehandletest, $thisline);
       } else {
-        // Start building the DGAdictionary data.
-        $bigrams = Ngrams($sld,2);
-        $trigrams = Ngrams($sld,3);
-        $fourgrams = Ngrams($sld,4);
-        $fivegrams = Ngrams($sld,5);
-        
-        //http://stackoverflow.com/questions/1496682/how-to-sum-values-of-the-array-of-the-same-key
-        array_walk_recursive($bigrams, function($key, $item) use (&$isDGAbilist, &$nonDGAbilist, &$isDGA){
-          if($isDGA == 1){
-            $isDGAbilist[$key] = isset($isDGAbilist[$key]) ?  $isDGAbilist[$key] + 1 : 1;
-          } else {
-            $nonDGAbilist[$key] = isset($nonDGAbilist[$key]) ?  $nonDGAbilist[$key] + 1 : 1;
-          }
-        });
-        array_walk_recursive($trigrams, function($key, $item) use (&$isDGAtrilist, &$nonDGAtrilist, &$isDGA){
-          if($isDGA == 1){
-            $isDGAtrilist[$key] = isset($isDGAtrilist[$key]) ?  $isDGAtrilist[$key] + 1 : 1;
-          } else {
-            $nonDGAtrilist[$key] = isset($nonDGAtrilist[$key]) ?  $nonDGAtrilist[$key] + 1 : 1;
-          }
-        });
-        array_walk_recursive($fourgrams, function($key, $item) use (&$isDGAfourlist, &$nonDGAfourlist, &$isDGA){
-          if($isDGA == 1){
-            $isDGAfourlist[$key] = isset($isDGAfourlist[$key]) ?  $isDGAfourlist[$key] + 1 : 1;
-          } else {
-            $nonDGAfourlist[$key] = isset($nonDGAfourlist[$key]) ?  $nonDGAfourlist[$key] + 1 : 1;
-          }
-        });
-        array_walk_recursive($fivegrams, function($key, $item) use (&$isDGAfivelist, &$nonDGAfivelist, &$isDGA){
-          if($isDGA == 1){
-            $isDGAfivelist[$key] = isset($isDGAfivelist[$key]) ?  $isDGAfivelist[$key] + 1 : 1;
-          } else {
-            $nonDGAfivelist[$key] = isset($nonDGAfivelist[$key]) ?  $nonDGAfivelist[$key] + 1 : 1;
-          }
-        });
+      
+      
+        for ($i = 2; $i <= 5; $i ++){
+          $grams = Ngrams($sld,$i);
+          array_walk_recursive($grams, function($key, $item) use (&$dictionary, &$isDGA, $i){
+            if($isDGA == 1){
+              //$dictionary[$i]['isDGA']->$key = isset($dictionary[$i]['isDGA']->$key) ?  $dictionary[$i]['isDGA']->$key + 1 : 1;
+              $dictionary[$i]['isDGA'][$key] = isset($dictionary[$i]['isDGA'][$key]) ?  $dictionary[$i]['isDGA'][$key] + 1 : 1;
+            } else {
+              //$dictionary[$i]['nonDGA']->$key = isset($dictionary[$i]['nonDGA']->$key) ?  $dictionary[$i]['nonDGA']->$key + 1 : 1;
+              $dictionary[$i]['nonDGA'][$key] = isset($dictionary[$i]['nonDGA'][$key]) ?  $dictionary[$i]['nonDGA'][$key] + 1 : 1;
+            }
+          });
+        }
+      
         fwrite($writehandletrain, $thisline);
         
       } 
@@ -138,47 +174,68 @@ for ($testslice = 0; $testslice <= 9; $testslice ++){
   fclose($writehandletrain);
   fclose($writehandletest);
 
-      
+  // New  plan: Build arrays, then cast arrays into ArrayObjects as like:
+  // $dictionary['2']['isDGA'] = new ArrayObject($dictionary['2']['isDGA']);
+  // And hope that ArrayObject doesn't loose it's way with integers...
 
-
-     
-  // Assemble lists into a dictionary that is an array of arrays.   
-  $dictionary = array();
-  $dictionary['2']['isDGA'] = $isDGAbilist;
-  $dictionary['2']['nonDGA'] = $nonDGAbilist;
-  $dictionary['3']['isDGA'] = $isDGAtrilist;
-  $dictionary['3']['nonDGA'] = $nonDGAtrilist;   
-  $dictionary['4']['isDGA'] = $isDGAfourlist;
-  $dictionary['4']['nonDGA'] = $nonDGAfourlist;
-  $dictionary['5']['isDGA'] = $isDGAfivelist;
-  $dictionary['5']['nonDGA'] = $nonDGAfivelist;
-
-  // Process those arrays as necessary.
+           
+  // Process those ArrayObjects as necessary.
   for ($i = 2; $i <= 5; $i ++){
-    // Reverse Sort array by value.
-    arsort($dictionary[$i]['isDGA']);
-    arsort($dictionary[$i]['nonDGA']);
-    // Convert array with ngram as key and count as value to integer key and ngram as value.
-    $dictionary[$i]['isDGA'] = array_keys($dictionary[$i]['isDGA']);
-    $dictionary[$i]['nonDGA'] = array_keys($dictionary[$i]['nonDGA']);
-    // Max possible number of ngrams is 37^n. Since we want the 'common' ngrams only, the array_slice truncates the list to contain at most half that number of ngrams.
-    $dictionary[$i]['isDGA'] = array_slice($dictionary[$i]['isDGA'],0,round((pow(37,$i))/2));
-    $dictionary[$i]['nonDGA'] = array_slice($dictionary[$i]['nonDGA'],0,round((pow(37,$i))/2));
-    // If an ngram is contained in both lists then it has no predictive value. array_diff returns an array that is a subset of the first array without any of the items from the second array.
-    $a = array_diff($dictionary[$i]['isDGA'], $dictionary[$i]['nonDGA']);
-    $b = array_diff($dictionary[$i]['nonDGA'], $dictionary[$i]['isDGA']);
-    $dictionary[$i]['isDGA'] = $a;
-    $dictionary[$i]['nonDGA'] = $b;
-    // Flip keys/values so that ngram is the key.
-    $dictionary[$i]['isDGA'] = array_flip($dictionary[$i]['isDGA']);
-    $dictionary[$i]['nonDGA'] = array_flip($dictionary[$i]['nonDGA']);
+    
+    // Reverse Sort arrayObject by value.
+    $dictionary[$i]['isDGA']->uasort('dsort');
+    $dictionary[$i]['nonDGA']->uasort('dsort');
+       
+    // !! maybe chop list to half of actual length?? so that shorter list doesn't corrupt full length list.
+    // Max possible number of ngrams is 37^n. Since we want the 'common' ngrams only, the array_slice truncates the list to contain at most half that number of ngrams.   
+    
+    $tempisDGA = new ArrayObject();
+    $tempnonDGA = new ArrayObject();
+    
+    $isDGAcounttarget =  min(100000,round(count($dictionary[$i]['isDGA'])/2));
+    $nonDGAcounttarget = min(100000,round(count($dictionary[$i]['nonDGA'])/2));
+    
+    //$dictionary[$i]['isDGA'] = array_slice($dictionary[$i]['isDGA'],0,round((pow(36,$i))/2));
+    //$dictionary[$i]['nonDGA'] = array_slice($dictionary[$i]['nonDGA'],0,round((pow(36,$i))/2));
+
+    $counter = 0;
+    foreach ($dictionary[$i]['isDGA'] as $ngram => $gramcount){
+      if($counter < $isDGAcounttarget){
+        //unset($dictionary[$i]['isDGA'][$ngram]);
+        $tempisDGA[$ngram] = $gramcount;
+      }
+      $counter++;
+    }
+    $counter = 0;
+    foreach ($dictionary[$i]['nonDGA'] as $ngram => $gramcount){
+      if($counter < $nonDGAcounttarget){
+        //unset($dictionary[$i]['nonDGA'][$ngram]);
+        $tempnonDGA[$ngram] = $gramcount;
+      }
+      $counter++;
+    }
+   
+    $dictionary[$i]['isDGA'] = $tempisDGA->getArrayCopy();
+    $dictionary[$i]['nonDGA'] = $tempnonDGA->getArrayCopy();
+    
+    // If an ngram is contained in both lists then it has no predictive value. So it might get removed from both lists.
+    foreach($tempisDGA as $gram => $counter) {
+      if(isset($tempnonDGA[$gram])) {  
+        unset($dictionary[$i]['isDGA'][$gram]);  
+        unset($dictionary[$i]['nonDGA'][$gram]);        
+      }
+    }
+    
+    unset($tempisDGA);
+    unset($tempnonDGA);
+        
+    print("dictionary[" . $i . "]['isDGA'] truncated to " . count($dictionary[$i]['isDGA']) . "\n"); 
+    print("dictionary[" . $i . "]['nonDGA'] truncated to " . count($dictionary[$i]['nonDGA']) . "\n");
+    
   }
-  //print_r(array_splice($dictionary[3]['nonDGA'],0,20));
 
   // Save the dictionary to the filesystem.
-  file_put_contents($datadirectory . "ngramDictionary_" . $testslice . ".txt", var_export($dictionary, TRUE));
-
-
+  file_put_contents($datadirectory . "ngramDictionary_" . $testslice . ".txt", print_r($dictionary, TRUE));
 
 
 
@@ -199,58 +256,8 @@ for ($testslice = 0; $testslice <= 9; $testslice ++){
         $sld = $line['2'];
         $sldlen = $line['3'];
         $gramphrase = "";
-        
-        /*
-        // array_intersect test block
-        $gramphrase = "\narray_intersect";
-        $onesld_time_start = microtime(true);
-        for ($n = 2; $n <= 5; $n ++){
-          $isDGAratio = 0;
-          $nonDGAratio = 0;
-          if($n <= $sldlen){
-            $grams = Ngrams($sld, $n);
-            $isDGAratio =  round(count(array_intersect($grams, $dictionary[$n]['isDGA']))  /  ($sldlen - $n + 1),2);
-            $nonDGAratio = round(count(array_intersect($grams, $dictionary[$n]['nonDGA']))  / ($sldlen - $n + 1),2);
-          }
-          $gramphrase .= "," . $isDGAratio . "," . $nonDGAratio;
-        }  
-        $onesld_time_end = microtime(true);
-        print("Execution time array_intersect in seconds: " . ($onesld_time_end-$onesld_time_start) . "\n");
-        
-        
-        // in_array test block
-        $gramphrase .= "\nin_array       ";
-        $onesld_time_start = microtime(true);
-        for ($n = 2; $n <= 5; $n ++){
-          $isDGAratio = 0;
-          $nonDGAratio = 0;
-          if($n <= $sldlen){
-            $grams = Ngrams($sld, $n);
-            $isDGAcounter = 0;
-            $nonDGAcounter = 0;
-            foreach($grams as $gram) {
-              if(in_array($gram,$dictionary[$n]['isDGA'])) {  
-                $isDGAcounter += 1;           
-              }
-              if(in_array($gram,$dictionary[$n]['nonDGA'])) {  
-                $nonDGAcounter += 1;           
-              }
-              //$isDGAratio =  round($isDGAcounter  /  ($sldlen - $n + 1),2);
-              //$nonDGAratio =  round($nonDGAcounter  /  ($sldlen - $n + 1),2);
-            }
-            $isDGAratio =  round($isDGAcounter  /  ($sldlen - $n + 1),2);
-            $nonDGAratio =  round($nonDGAcounter  /  ($sldlen - $n + 1),2);
-          }
-          $gramphrase .= "," . $isDGAratio . "," . $nonDGAratio;
-        }  
-        $onesld_time_end = microtime(true);
-        print("Execution time in_array in seconds: " . ($onesld_time_end-$onesld_time_start) . "\n");
-        */
-        
-        
-        // isset test block
-        //$gramphrase .= "\nisset          ";
-        //$onesld_time_start = microtime(true);
+          
+        // isset() is a fast method to check for existance of a gram.
         for ($n = 2; $n <= 5; $n ++){
           $isDGAratio = 0;
           $nonDGAratio = 0;
@@ -265,19 +272,13 @@ for ($testslice = 0; $testslice <= 9; $testslice ++){
               if(isset($dictionary[$n]['nonDGA'][$gram])) {  
                 $nonDGAcounter += 1;           
               }
-              //$isDGAratio =  round($isDGAcounter  /  ($sldlen - $n + 1),2);
-              //$nonDGAratio =  round($nonDGAcounter  /  ($sldlen - $n + 1),2);
             }
-            $isDGAratio =  round($isDGAcounter  /  ($sldlen - $n + 1),2);
-            $nonDGAratio =  round($nonDGAcounter  /  ($sldlen - $n + 1),2);
+            $isDGAratio =  round($isDGAcounter  /  ($sldlen - $n + 1),$decimalplaces);
+            $nonDGAratio =  round($nonDGAcounter  /  ($sldlen - $n + 1),$decimalplaces);
           }
           $gramphrase .= "," . $isDGAratio . "," . $nonDGAratio;
         }  
-        //$onesld_time_end = microtime(true);
-        //print("Execution time isset in seconds: " . ($onesld_time_end-$onesld_time_start) . "\n");
-        
-        
-        
+       
         fwrite($writehandletrain, implode(",", $line) . $gramphrase . "\n");
       }
     }
@@ -299,10 +300,6 @@ print("Execution time in seconds: " . ($time_end-$time_start) . "\n");
 print("end dga-preprocess.php\n");
  
  
- 
- 
- 
-
  
 function Ngrams($word,$n=3){
   $len=strlen($word);
@@ -346,5 +343,10 @@ function Ngrams($word,$n=3){
       }
     }
   }
-  return round(array_sum($charbools)/$wordlength,2 );
+  return array_sum($charbools)/$wordlength;
+}
+
+function dsort($a, $b) {
+	if($a == $b){ return 0 ; }
+	return ($a > $b) ? -1 : 1;
 }
