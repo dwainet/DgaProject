@@ -2,7 +2,6 @@
 /*
  * dga-preprocess.php
  * 
- * DGA data file from James at https://drive.google.com/file/d/0B1Dn5h3H5xylQkNrbU5mZWR2Q00/view?pli=1
  * sld allows a-z0-9 and hyphen
  *
  * trainXwithclass <- traindgadata[,c( "isDGA","sldlen","dword","bigramTRUEratio","trigramTRUEratio","fourgramTRUEratio","fivegramTRUEratio","bigramFALSEratio","trigramFALSEratio","fourgramFALSEratio","fivegramFALSEratio")]
